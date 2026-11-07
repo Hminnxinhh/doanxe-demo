@@ -1,11 +1,11 @@
 // Platform seam: no SDK, ad requests, analytics endpoints, or personal data.
-const KEY = 'dxpl.progress.v1';
+const KEY = 'dxpl.progress.v15';
 export class LocalProgress {
   constructor(storage) {
     this.persistent = true;
     try { this.storage = storage ?? globalThis.localStorage; } catch { this.persistent = false; }
-    this.data = { version: 1, runs: 0, wins: 0, losses: 0, retries: 0, starts: 0, totalSeconds: 0, bestScore: 0, sun: 0, collection: [], recent: [], muted: false };
-    try { const saved = JSON.parse(this.storage?.getItem(KEY) ?? null); if (saved?.version === 1) this.data = { ...this.data, ...saved }; }
+    this.data = { version: 2, nextVariant: 0, medals: [], runs: 0, wins: 0, losses: 0, retries: 0, starts: 0, totalSeconds: 0, bestScore: 0, sun: 0, collection: [], recent: [], muted: false };
+    try { const saved = JSON.parse(this.storage?.getItem(KEY) ?? null); if (saved?.version === 2) this.data = { ...this.data, ...saved }; }
     catch { this.persistent = false; }
   }
   save() { try { this.storage.setItem(KEY, JSON.stringify(this.data)); } catch { this.persistent = false; } }
@@ -14,7 +14,8 @@ export class LocalProgress {
     const d = this.data, won = game.state === 'won';
     d.runs++; d[won ? 'wins' : 'losses']++; d.totalSeconds += Math.round(game.time); d.bestScore = Math.max(d.bestScore, game.score); d.sun += game.coins;
     d.collection = [...new Set([...d.collection, ...game.allies])];
-    d.recent.push({ won, seconds: Math.round(game.time), score: game.score, rescued: game.stats.rescued, routes: [...game.routeHistory] });
+    if(won){const medals=[...(game.convoy.hp>=70?['guardian']:[]),...(game.camp.state==='rescued'?['rescuer']:[]),...(game.stats.padShots>=4?['sunmaster']:[])];d.medals=[...new Set([...d.medals,...medals])];}
+    d.recent.push({ won, seconds: Math.round(game.time), score: game.score, rescued: game.stats.rescued, choices: [...game.choices], variant: game.variant, padShots: game.stats.padShots, hull: Math.round(game.convoy.hp) });
     d.recent = d.recent.slice(-20); this.save();
   }
   clear() { this.storage.removeItem(KEY); }
@@ -41,9 +42,11 @@ export class Sound {
   play(kind) {
     if (kind === 'pickup') { if (performance.now() - this.lastPickup < 65) return; this.lastPickup = performance.now(); this.tone(800 + Math.random() * 400, .13); }
     else if (kind === 'shot') this.tone(380, .08, 'triangle', .025);
-    else if (kind === 'hit' || kind === 'slam') this.tone(90, .22, 'triangle', .11);
-    else if (kind === 'rescue' || kind === 'route') [523, 659, 784, 1047].forEach((f, i) => this.tone(f, .23, 'sine', .075, i * .095));
+    else if (kind === 'hit' || kind === 'hullHit' || kind === 'slam') this.tone(90, .22, 'triangle', .11);
+    else if (kind === 'rescue' || kind === 'choice') [523, 659, 784, 1047].forEach((f, i) => this.tone(f, .23, 'sine', .075, i * .095));
     else if (kind === 'win') [523, 659, 784, 1047, 1319].forEach((f, i) => this.tone(f, .4, 'triangle', .055, i * .13));
+    else if (kind === 'beam') this.tone(1100, .32, 'triangle', .08);
+    else if (kind === 'bossPhase') this.tone(75, .6, 'triangle', .1);
     else if (kind === 'heal' || kind === 'block') this.tone(660, .24, 'sine', .06);
     else if (kind === 'lose') [392, 330, 262].forEach((f, i) => this.tone(f, .35, 'sine', .07, i * .2));
   }

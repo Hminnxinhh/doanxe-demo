@@ -1,84 +1,34 @@
-import { Expedition, ALLIES, W, H, DURATION, clamp } from './model.js';
-import { Renderer } from './renderer.js';
-import { LocalProgress, PortalAdapter, Sound } from './platform.js';
-const $=id=>document.getElementById(id);
-const store=new LocalProgress(), portal=new PortalAdapter(), sound=new Sound(store.data.muted);
-const renderer=new Renderer($('game'));
-let game=null, scene='home', paused=false, elapsed=0, last=0, accumulator=0, pointer=null, toastUntil=0, ended=false, frameCount=0;
-const keys=new Set();
-const chapters=['Rừng thì thầm','Thung lũng hổ phách','Cánh cổng cổ thụ'];
-function show(id, visible){$(id).hidden=!visible;}
-function syncSound(){for(const id of ['sound','home-sound']){const b=$(id);b.textContent=id==='sound'?(sound.muted?'♪̸':'♫'):(sound.muted?'♪ Tắt tiếng':'♫ Âm thanh');b.setAttribute('aria-label',sound.muted?'Bật âm thanh':'Tắt âm thanh');b.setAttribute('aria-pressed',String(!sound.muted));}}
-function toggleSound(){sound.unlock();sound.muted=!sound.muted;store.data.muted=sound.muted;store.save();syncSound();if(!sound.muted)sound.play('pickup');}
-function clearInput(){pointer=null;keys.clear();if(game){game.target=null;game.keys={x:0,y:0};}}
-function toast(icon,title,detail,duration=3){$('toast-icon').src=`./assets/${icon}.svg`;$('toast-title').textContent=title;$('toast-detail').textContent=detail;show('toast',true);toastUntil=(game?.time||0)+duration;}
-function start(retry=false){
-  clearInput();sound.unlock();game=new Expedition();scene='game';paused=false;ended=false;accumulator=0;renderer.effects=[];store.start(retry);portal.gameplayStart();
-  for(const id of ['home','pause-screen','result','journal-screen','toast'])show(id,false);show('hud',true);show('gesture-tip',true);updateHUD();
-}
-function goHome(){clearInput();portal.gameplayStop();game=null;scene='home';paused=false;for(const id of ['hud','pause-screen','result','journal-screen'])show(id,false);show('home',true);$('collection-count').textContent=`${store.data.collection.length}/3`;}
-function pause(reason='Chuyến đi đã được tạm dừng.'){
-  if(scene!=='game'||!game||game.state!=='playing'||paused)return;paused=true;clearInput();portal.gameplayStop();sound.suspend();$('pause-copy').textContent=reason;show('pause-screen',true);$('resume').focus({preventScroll:true});
-}
-function resume(){if(!game||game.state!=='playing')return;sound.unlock();paused=false;accumulator=0;last=performance.now();show('pause-screen',false);portal.gameplayStart();}
-function finish(){
-  if(ended)return;ended=true;clearInput();portal.gameplayStop();store.record(game);const won=game.state==='won';
-  sound.play(won?'win':'lose');show('toast',false);show('gesture-tip',false);show('hud',false);show('result',true);
-  $('result-eyebrow').textContent=won?'MỘT CHUYẾN ĐI TUYỆT VỜI':'MỖI CHUYẾN ĐI, MỘT ĐIỀU MỚI';
-  $('result-title').textContent=won?'Cả đoàn đã về đích!':'Thử một lối đi khác?';
-  $('result-detail').textContent=won?'Bạn đã mở cổng rừng và đưa những người bạn về nhà.':game.reason;
-  $('result-sun').textContent=game.coins;$('result-rescued').textContent=game.stats.rescued;$('result-hp').textContent=`${Math.ceil(game.convoy.hp)}%`;$('result-score').textContent=game.score.toLocaleString('vi-VN');
-  $('record-note').textContent=store.persistent?`Đã lưu trên máy · Sưu tập ${store.data.collection.length}/3 người bạn`:'Bộ nhớ bị chặn · Kết quả chỉ giữ trong phiên này';
-  $('replay').focus({preventScroll:true});
-}
-function processEvents(){for(const e of game.drainEvents()){
-  renderer.addEffect(e.type,e);sound.play(e.type);
-  if(e.type==='rescue'){const a=ALLIES[e.kind];toast(e.kind,e.already?`${a.name} tiếp sức!`:`${a.name} đã gia nhập!`,e.already?'+12 độ bền · Tăng sức mạnh':a.detail,3.7);show('gesture-tip',false);}
-  if(e.type==='camp')toast('cage','Có bạn đang mắc kẹt!','Đứng gần 1 giây để giải cứu',3);
-  if(e.type==='fork')toast('sign','Hai lối đi, một lựa chọn','Dẫn cáo qua cổng bạn thích',3.5);
-  if(e.type==='route')toast({heal:'heart',power:'sun',shield:'shield',sun:'sun'}[e.reward],{heal:'Trạm nghỉ bên suối',power:'Sức mạnh ánh nắng',shield:'Lá chắn cổ thụ',sun:'Kho báu ven đường'}[e.reward],{heal:'+32 độ bền đoàn xe',power:'Mọi đòn đánh mạnh hơn',shield:'+2 lần chặn sát thương',sun:'+12 nắng cho hành trình'}[e.reward],3);
-  if(e.type==='phase')toast(e.phase===1?'amber-tree':'boss',chapters[e.phase],e.phase===1?'Đường hẹp hơn · Cẩn thận đá và gỗ':'Né vòng đỏ · Gom nắng phá giáp',4);
-  if(e.type==='end')finish();
-}}
-function updateHUD(){
-  const g=game;if(!g)return;
-  $('chapter-name').textContent=chapters[g.phase];$('chapter-number').textContent=`0${g.phase+1}`;
-  $('health-fill').style.width=`${g.convoy.hp}%`;$('health-fill').style.background=g.convoy.hp<35?'#eea080':'';
-  $('health-value').textContent=Math.ceil(g.convoy.hp);$('shield-value').textContent=g.shield?`◆${g.shield}`:'';
-  $('sun-value').textContent=g.coins;$('journey-fill').style.width=`${g.time/DURATION*100}%`;
-  $('stop-2').classList.toggle('active',g.phase>=1);$('stop-3').classList.toggle('active',g.phase>=2);
-  const remaining=Math.max(0,Math.ceil(DURATION-g.time));$('timer').textContent=`${Math.floor(remaining/60).toString().padStart(2,'0')}:${(remaining%60).toString().padStart(2,'0')}`;
-  $('crew-count').textContent=`${g.allies.length} / 3`;document.querySelectorAll('#crew>div').forEach(el=>el.classList.toggle('unlocked',g.allies.includes(el.dataset.kind)));
-  show('boss-hud',!!g.boss);if(g.boss){$('boss-fill').style.width=`${Math.max(0,g.boss.hp)/g.boss.maxHp*100}%`;$('boss-hint').textContent=g.boss.vulnerable?'Lõi sáng · Có thể tấn công':'Giáp đóng · Gom nắng phá giáp';}
-  if(g.time>9)show('gesture-tip',false);if(g.time>toastUntil)show('toast',false);
-}
-function journal(){
-  show('journal-screen',true);const d=store.data;
-  $('album').innerHTML=Object.entries(ALLIES).map(([kind,a])=>`<div class="${d.collection.includes(kind)?'':'locked'}"><img src="./assets/${kind}.svg" alt="${a.name}"><strong>${d.collection.includes(kind)?a.name:'Chưa gặp'}</strong><small>${a.role}</small></div>`).join('');
-  const rate=d.starts?Math.round(d.runs/d.starts*100):0;
-  $('local-stats').innerHTML=`<b>${d.runs}</b> chuyến hoàn tất · <b>${d.wins}</b> thắng · <b>${d.losses}</b> thua<br><b>${d.sun}</b> nắng · Kỷ lục <b>${d.bestScore}</b> điểm<br><b>${Math.round(d.totalSeconds/60)}</b> phút chơi · <b>${d.retries}</b> lần chơi lại<br>Hoàn tất <b>${rate}%</b> / <b>${d.starts}</b> lượt bắt đầu`;
-}
-function point(e){const r=$('game').getBoundingClientRect();return{x:clamp((e.clientX-r.left)/r.width*W,26,364),y:clamp((e.clientY-r.top)/r.height*H-52,228,714)};}
-$('game').addEventListener('pointerdown',e=>{if(scene!=='game'||paused||game.state!=='playing'||pointer!==null)return;e.preventDefault();sound.unlock();pointer=e.pointerId;$('game').setPointerCapture(e.pointerId);game.target=point(e);});
-$('game').addEventListener('pointermove',e=>{if(e.pointerId===pointer&&game&&!paused){e.preventDefault();game.target=point(e);}});
-for(const name of ['pointerup','pointercancel','lostpointercapture'])$('game').addEventListener(name,e=>{if(e.pointerId===pointer){pointer=null;if(game)game.target=null;}});
-function updateKeys(){if(game)game.keys={x:Number(keys.has('ArrowRight')||keys.has('d'))-Number(keys.has('ArrowLeft')||keys.has('a')),y:Number(keys.has('ArrowDown')||keys.has('s'))-Number(keys.has('ArrowUp')||keys.has('w'))};}
-window.addEventListener('keydown',e=>{if(e.key==='Escape'||e.key==='p'){if(e.repeat)return;if(paused)resume();else pause();}if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','w','a','s','d'].includes(e.key)&&scene==='game'&&!paused){e.preventDefault();keys.add(e.key);updateKeys();}});
-window.addEventListener('keyup',e=>{keys.delete(e.key);updateKeys();});
-window.addEventListener('blur',()=>pause('Bạn vừa rời màn hình. Đoàn xe đang nghỉ chân.'));
-document.addEventListener('visibilitychange',()=>{if(document.hidden)pause('Chuyến đi đã dừng khi bạn chuyển ứng dụng.');});
-function orientation(){const sideways=matchMedia('(pointer: coarse)').matches&&innerWidth>innerHeight;show('rotate-hint',sideways);if(sideways)pause('Xoay dọc màn hình rồi chạm Đi tiếp.');}
-window.addEventListener('resize',orientation);
-$('play').onclick=()=>start();$('replay').onclick=()=>start(true);$('restart').onclick=()=>start(true);$('pause').onclick=()=>pause();$('resume').onclick=resume;$('back-home').onclick=goHome;$('result-home').onclick=goHome;
-$('sound').onclick=toggleSound;$('home-sound').onclick=toggleSound;$('journal').onclick=journal;$('close-journal').onclick=()=>show('journal-screen',false);
-$('clear-data').onclick=()=>{if($('clear-data').dataset.confirm!=='yes'){$('clear-data').dataset.confirm='yes';$('clear-data').textContent='Chạm lần nữa để xác nhận xóa';return;}try{store.clear();}catch{}location.reload();};
-function frame(now){
-  requestAnimationFrame(frame);const delta=last?Math.min((now-last)/1000,.12):0;last=now;elapsed+=delta;
-  if(scene==='home'){renderer.drawHome(elapsed);return;}
-  if(!paused&&game.state==='playing'){accumulator+=delta;while(accumulator>=1/60){game.update(1/60);processEvents();accumulator-=1/60;if(game.state!=='playing')break;}}
-  renderer.draw(game,elapsed,paused);if(++frameCount%3===0)updateHUD();
-}
-try{await renderer.load();renderer.drawHome(0);show('loading',false);show('home',true);syncSound();$('collection-count').textContent=`${store.data.collection.length}/3`;orientation();requestAnimationFrame(frame);
-  // Read-only diagnostics, only on an explicitly opted-in local test origin.
-  if(new URLSearchParams(location.search).has('qa')&&['localhost','127.0.0.1','[::1]'].includes(location.hostname))Object.defineProperty(window,'__EXPEDITION_QA__',{value:Object.freeze({snapshot:()=>game?.snapshot(),progress:()=>structuredClone(store.data),status:()=>({scene,paused,assets:Object.keys(renderer.images).length,frames:frameCount,audio: sound.ctx?.state||'not-started',muted:sound.muted})})});
-}catch(error){$('loading').classList.add('error');$('loading').replaceChildren();const p=document.createElement('p');p.textContent='Chưa tải được khu rừng. Hãy mở bản build bằng máy chủ Web và thử lại.';const b=document.createElement('button');b.textContent='Tải lại';b.onclick=()=>location.reload();$('loading').append(p,b);console.error(error);}
+import {Expedition,ALLIES,SCENARIOS,W,H,DURATION,clamp,distance} from './model.js';
+import {Renderer} from './renderer.js';
+import {LocalProgress,Sound,PortalAdapter} from './platform.js';
+const $=id=>document.getElementById(id),store=new LocalProgress(),sound=new Sound(store.data.muted),portal=new PortalAdapter(),renderer=new Renderer($('game'));
+let game=null,scene='home',paused=false,elapsed=0,last=0,acc=0,ended=false,joystick=null,pointer=null,toastUntil=0,frames=0;
+const keys=new Set(),qa=new URLSearchParams(location.search).has('qa')&&['localhost','127.0.0.1','[::1]'].includes(location.hostname);
+function show(id,on){$(id).hidden=!on;}
+function homeInfo(){const s=SCENARIOS[store.data.nextVariant%3];$('scenario-icon').src=`./assets/${s.friend}.svg`;$('scenario-name').textContent=s.name;$('scenario-detail').textContent=s.detail;$('collection-count').textContent=`${store.data.collection.length}/3`;}
+function syncSound(){for(const id of['sound','home-sound']){$(id).textContent=id==='sound'?(sound.muted?'♪̸':'♫'):(sound.muted?'♪ Tắt tiếng':'♫ Âm thanh');$(id).setAttribute('aria-label',sound.muted?'Bật âm thanh':'Tắt âm thanh');$(id).setAttribute('aria-pressed',String(!sound.muted));}}
+function clearInput(){if(pointer!==null&&$('game').hasPointerCapture(pointer))$('game').releasePointerCapture(pointer);pointer=null;joystick=null;keys.clear();if(game)game.input={x:0,y:0};}
+function toast(icon,title,detail,seconds=3){$('toast-icon').src=`./assets/${icon}.svg`;$('toast-title').textContent=title;$('toast-detail').textContent=detail;toastUntil=game.time+seconds;show('toast',true);}
+function start(retry=false){clearInput();sound.unlock();const v=store.data.nextVariant%3,seed=qa&&new URLSearchParams(location.search).has('seed')?Number(new URLSearchParams(location.search).get('seed'))>>>0:Date.now()>>>0;game=new Expedition(seed,v);store.data.nextVariant=(v+1)%3;store.start(retry);scene='game';paused=false;ended=false;acc=0;renderer.reset(game);portal.gameplayStart();for(const id of['home','result','pause-screen','journal-screen','toast'])show(id,false);show('hud',true);show('gesture-tip',true);updateHUD();}
+function home(){clearInput();portal.gameplayStop();scene='home';game=null;paused=false;for(const id of['hud','result','pause-screen','journal-screen'])show(id,false);homeInfo();show('home',true);}
+function pause(reason='Chuyến đi đang tạm dừng.'){if(scene!=='game'||paused||game.state!=='playing')return;paused=true;clearInput();sound.suspend();portal.gameplayStop();$('pause-copy').textContent=reason;show('pause-screen',true);}
+function resume(){if(!game||game.state!=='playing'||!$('rotate-hint').hidden)return;sound.unlock();paused=false;acc=0;last=performance.now();portal.gameplayStart();show('pause-screen',false);}
+function finish(){if(ended)return;ended=true;clearInput();portal.gameplayStop();store.record(game);const won=game.state==='won';sound.play(won?'win':'lose');show('hud',false);show('toast',false);show('result',true);$('result-eyebrow').textContent=won?'QUYẾT ĐỊNH CỦA BẠN ĐÃ TẠO NÊN CHUYẾN ĐI':'KHU RỪNG VẪN CÒN MỘT LỐI KHÁC';$('result-title').textContent=won?'Cánh cổng đã mở!':'Đổi chiến thuật nhé?';$('result-detail').textContent=won?`Về đích sau ${Math.round(game.time)} giây · ${game.convoy.hp>=70?'Đoàn xe được giữ vững!':'Cả đoàn vừa thoát hiểm!'}`:game.reason;$('result-hp').textContent=`${Math.ceil(game.convoy.hp)}%`;$('result-enemies').textContent=game.stats.defeated;$('result-beams').textContent=game.stats.padShots;
+ $('choice-recap').replaceChildren();for(const text of[game.camp.state==='rescued'?`Đã cứu ${ALLIES[game.camp.kind].name}`:`Đã bỏ lỡ ${ALLIES[game.camp.kind].name}`,{roots:'Rễ sống che chở',turret:'Tháp xe giữ đoàn',none:'Bỏ lỡ trạm phòng thủ'}[game.decision]||'Chưa tới trạm phòng thủ']){const s=document.createElement('span');s.textContent=text;$('choice-recap').append(s);}const next=SCENARIOS[store.data.nextVariant%3];$('next-scenario').textContent=next.name;$('next-detail').textContent=next.detail;}
+function events(){for(const e of game.drainEvents()){renderer.addEffect(e.type,e);sound.play(e.type);if(e.type==='camp')toast(e.kind,`${ALLIES[e.kind].name} mắc kẹt bên rừng!`,'Rời xe cứu bạn · Địch lao tới sau 6 giây',4);if(e.type==='ambush')toast('prowler','Bầy lao đang ập tới!','Chặn đường chúng trước khi chạm xe',2.7);if(e.type==='rescue')toast(e.kind,`${ALLIES[e.kind].name} đi cùng bạn!`,ALLIES[e.kind].role,3);if(e.type==='missed')toast('cage',`${ALLIES[e.kind].name} đã bị đưa đi`,'Giữ xe an toàn, nhưng mất năng lực đồng hành',3);if(e.type==='mission2')toast('fern','Đánh thức rễ hay giữ xe?','Tới phế tích lấy rễ · Ở bên xe lắp tháp',4);if(e.type==='choice')toast(e.choice==='roots'?'fern':'shield',e.choice==='roots'?'Rễ sống trỗi dậy!':e.choice==='turret'?'Tháp xe đã sẵn sàng!':'Bỏ lỡ trạm phòng thủ',e.choice==='roots'?'Chặn lối địch · Một quái nặng vừa thức giấc':e.choice==='turret'?'Ná nắng trên xe tự chặn bầy quái đến gần':'Thử chọn một hướng sớm hơn ở lượt tới',3);if(e.type==='boss')toast('boss','Thần cây thức giấc','Né đòn · Lõi mở thì đứng trên gương sáng',4);if(e.type==='bossPhase')toast('boss','Thần cây nổi giận · PHA II','Đòn lao mới · Đừng đứng yên ở gương!',2.5);if(e.type==='end')finish();}}
+function updateHUD(){if(!game)return;const g=game,t=g.time,b=g.boss;$('chapter-number').textContent=b?'03':t>=36?'02':'01';$('chapter-name').textContent=b?'Đối mặt thần cây':t>=36?'Phế tích rễ sống':'Lời gọi trong rừng';$('health-fill').style.width=`${g.convoy.hp}%`;$('health-fill').style.background=g.convoy.hp<35?'#f0a07d':'';$('health-value').textContent=Math.ceil(g.convoy.hp);$('hero-value').textContent=Math.ceil(g.player.hp);const sec=Math.max(0,Math.ceil(DURATION-t));$('timer').textContent=`${Math.floor(sec/60).toString().padStart(2,'0')}:${(sec%60).toString().padStart(2,'0')}`;
+ let objective='Theo xe · Khám phá hai bên rừng',icon='sign';if(g.camp.state==='open'){objective=`Cứu ${ALLIES[g.camp.kind].name} (${Math.ceil(31-t)}s) hoặc ở lại giữ xe`;icon=g.camp.kind;}else if(g.shrine.state==='open'){objective=`Tìm rễ hộ vệ hoặc giữ xe 4s để lắp tháp · ${Math.ceil(56-t)}s`;icon='fern';}else if(b){objective=b.state==='exposed'?'LÕI MỞ! Đứng trên gương nắng đang sáng':'Né vùng đỏ · Đợi lõi mở để phản công';icon='sun';}else if(g.decision){objective=g.decision==='roots'?'Rễ đang chắn lối · Dọn địch quanh xe':'Tháp đã canh xe · Chuẩn bị vào cổng';icon=g.decision==='roots'?'fern':'shield';}$('objective-text').textContent=objective;$('objective-icon').src=`./assets/${icon}.svg`;show('threat',g.enemies.some(e=>e.hp>0&&distance(e,g.convoy)<150)&&distance(g.player,g.convoy)>180);
+ show('boss-hud',!!b);if(b){$('boss-title').textContent=`THẦN CÂY · PHA ${b.phase===1?'I':'II'}`;$('boss-state').textContent=b.state==='exposed'?'Lõi đang mở!':b.state==='windup'?'Sắp ra đòn':b.state==='charge'?'ĐANG LAO!':'Giáp đóng';$('boss-fill').style.width=`${Math.max(0,b.hp)/b.maxHp*100}%`;$('boss-hint').textContent=b.state==='exposed'?'Chiếm gương sáng để bắn nắng vào lõi':b.attackKind==='charge'?'Tránh vệt lao · Phản công ngay sau đó':'Rời vùng báo đòn · Tìm gương nắng';}
+ const crewKey=g.allies.join();if($('crew').dataset.key!==crewKey){$('crew').dataset.key=crewKey;$('crew').innerHTML=g.allies.map(k=>`<div><img src="./assets/${k}.svg" alt="${ALLIES[k].name}"></div>`).join('');}$('decision-badge').textContent={roots:'✿ Rễ hộ vệ',turret:'⚑ Tháp giữ xe',none:''}[g.decision]||'';if(t>7)show('gesture-tip',false);if(t>toastUntil)show('toast',false);}
+function point(e){const r=$('game').getBoundingClientRect();return{x:(e.clientX-r.left)/r.width*W,y:(e.clientY-r.top)/r.height*H};}
+$('game').addEventListener('pointerdown',e=>{if(scene!=='game'||paused||game.state!=='playing'||pointer!==null)return;e.preventDefault();sound.unlock();pointer=e.pointerId;const a=point(e);joystick={...a,dx:0,dy:0};$('game').setPointerCapture(pointer);});
+$('game').addEventListener('pointermove',e=>{if(pointer!==e.pointerId||!joystick||paused)return;e.preventDefault();const a=point(e),dx=a.x-joystick.x,dy=a.y-joystick.y,m=Math.hypot(dx,dy);const k=Math.min(m,48)/(m||1);joystick.dx=dx*k;joystick.dy=dy*k;game.input=m<6?{x:0,y:0}:{x:joystick.dx/48,y:joystick.dy/48};});
+for(const event of['pointerup','pointercancel','lostpointercapture'])$('game').addEventListener(event,e=>{if(e.pointerId===pointer){pointer=null;joystick=null;if(game)game.input={x:0,y:0};}});
+function keyboard(){if(game)game.input={x:Number(keys.has('ArrowRight')||keys.has('d'))-Number(keys.has('ArrowLeft')||keys.has('a')),y:Number(keys.has('ArrowDown')||keys.has('s'))-Number(keys.has('ArrowUp')||keys.has('w'))};}
+window.addEventListener('keydown',e=>{if(e.key==='Escape'||e.key==='p'){if(e.repeat)return;paused?resume():pause();}if(['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','w','a','s','d'].includes(e.key)&&scene==='game'&&!paused){e.preventDefault();keys.add(e.key);keyboard();}});window.addEventListener('keyup',e=>{keys.delete(e.key);keyboard();});window.addEventListener('blur',()=>pause('Đã tạm dừng khi bạn rời màn hình.'));document.addEventListener('visibilitychange',()=>{if(document.hidden)pause('Đoàn xe nghỉ chân khi bạn chuyển ứng dụng.');});
+function orientation(){const sideways=matchMedia('(pointer:coarse)').matches&&innerWidth>innerHeight;show('rotate-hint',sideways);if(sideways)pause('Xoay dọc rồi chạm Đi tiếp.');}window.addEventListener('resize',orientation);
+$('play').onclick=()=>start();$('replay').onclick=()=>start(true);$('restart').onclick=()=>start(true);$('resume').onclick=resume;$('pause').onclick=()=>pause();$('back-home').onclick=home;$('result-home').onclick=home;
+for(const id of['sound','home-sound'])$(id).onclick=()=>{sound.unlock();sound.muted=!sound.muted;store.data.muted=sound.muted;store.save();syncSound();};
+$('journal').onclick=()=>{const d=store.data;$('album').innerHTML=Object.entries(ALLIES).map(([k,a])=>`<div class="${d.collection.includes(k)?'':'locked'}"><img src="./assets/${k}.svg" alt=""><strong>${d.collection.includes(k)?a.name:'Chưa gặp'}</strong><small>${a.role}</small></div>`).join('');$('local-stats').textContent=`${d.runs} trận · ${d.wins} thắng · ${d.losses} thua · ${d.retries} chơi lại · ${d.medals.length}/3 dấu ấn`;show('journal-screen',true);};$('close-journal').onclick=()=>show('journal-screen',false);$('clear-data').onclick=()=>{if($('clear-data').dataset.confirm!=='yes'){$('clear-data').dataset.confirm='yes';$('clear-data').textContent='Chạm lần nữa để xóa';return;}try{store.clear();}catch{}location.reload();};
+function frame(now){requestAnimationFrame(frame);const dt=last?clamp((now-last)/1000,0,.12):0;last=now;elapsed+=dt;if(scene==='home'){renderer.drawHome(elapsed,store.data.nextVariant);return;}if(!paused&&game.state==='playing'){acc+=dt;while(acc>=1/60){game.update(1/60);events();acc-=1/60;if(game.state!=='playing')break;}}renderer.draw(game,paused?0:dt,joystick);if(++frames%3===0)updateHUD();}
+try{await renderer.load();renderer.drawHome(0);show('loading',false);show('home',true);homeInfo();syncSound();orientation();if(qa)Object.defineProperty(window,'__EXPEDITION_QA__',{value:Object.freeze({snapshot:()=>game?.snapshot(),progress:()=>structuredClone(store.data),status:()=>({scene,paused,assets:Object.keys(renderer.images).length,camera:{...renderer.camera},frames,audio:sound.ctx?.state||'not-started',muted:sound.muted})})});requestAnimationFrame(frame);}catch(e){$('loading').textContent='Chưa tải được rừng. Hãy tải lại trang qua máy chủ HTTP/HTTPS.';console.error(e);}

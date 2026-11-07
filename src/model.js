@@ -1,178 +1,107 @@
-export const W = 390, H = 844, DURATION = 180;
-export const ALLIES = {
-  bunny: { name: 'Mây', role: 'Chữa lành', detail: 'Sửa xe định kỳ', color: '#a6d8a3' },
-  owl: { name: 'Mực', role: 'Trinh sát', detail: 'Hút nắng · tầm xa', color: '#d3b4ef' },
-  bear: { name: 'Bắp', role: 'Hộ vệ', detail: 'Khiên chặn sát thương', color: '#9ed6e0' },
-};
-export const clamp = (n, a, b) => Math.max(a, Math.min(b, n));
-export const distance = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
-export function rng(seed) {
-  let s = seed >>> 0;
-  return () => { s += 0x6d2b79f5; let t = s; t = Math.imul(t ^ t >>> 15, t | 1); t ^= t + Math.imul(t ^ t >>> 7, t | 61); return ((t ^ t >>> 14) >>> 0) / 4294967296; };
-}
+import {WORLD,DURATION,SCENARIOS,ALLIES,clamp,distance,rng,routePoint,moveBody} from './world.js';
+export {W,H,WORLD,DURATION,SCENARIOS,ALLIES,clamp,distance,rng} from './world.js';
 export class Expedition {
-  constructor(seed = Date.now() >>> 0) {
-    this.seed = seed; this.random = rng(seed); this.time = 0; this.phase = 0;
-    this.player = { x: 195, y: 480, invulnerable: 0, moving: 0 };
-    this.convoy = { x: 195, y: 620, hp: 100 };
-    this.target = null; this.keys = { x: 0, y: 0 };
-    this.coins = 0; this.score = 0; this.allies = []; this.power = 0; this.shield = 0;
-    this.enemies = []; this.pickups = []; this.hazards = []; this.rescues = []; this.warnings = [];
-    this.route = null; this.routeHistory = []; this.events = []; this.state = 'playing'; this.boss = null;
-    this.id = 0; this.shotAt = 0; this.itemAt = 0.4; this.enemyAt = 15; this.hazardAt = 20; this.repairAt = 22;
-    this.rescueSchedule = [8, 27, 46, 77, 112]; this.rescueIndex = 0;
-    this.rescueOrder = ['bunny', 'owl', 'bear'];
-    for (let i = this.rescueOrder.length - 1; i > 0; i--) { const j = Math.floor(this.random() * (i + 1)); [this.rescueOrder[i], this.rescueOrder[j]] = [this.rescueOrder[j], this.rescueOrder[i]]; }
-    this.healAt = 0; this.shieldAt = 0; this.bossAttackAt = 134; this.bossSunAt = 133;
-    this.stats = { rescued: 0, gathered: 0, defeated: 0, damage: 0, blocked: 0, routes: 0 };
+ constructor(seed=Date.now()>>>0,variant=seed%3){
+  this.seed=seed;this.random=rng(seed);this.variant=((variant%3)+3)%3;this.scenario=SCENARIOS[this.variant];this.time=0;this.state='playing';this.phase=0;this.id=0;this.events=[];
+  this.player={x:650,y:1125,hp:100,invulnerable:0,walk:0,facing:1,attack:0,hurt:0};this.input={x:0,y:0};this.target=null;
+  this.convoy={...routePoint(0),hp:100,hit:0};this.allies=[];this.enemies=[];this.projectiles=[];this.warnings=[];this.pickups=[];this.zones=[];this.barriers=[];
+  this.camp={x:650+this.scenario.side*285,y:1050,kind:this.scenario.friend,progress:0,state:'waiting',opens:9,deadline:31};
+  this.shrine={x:650-this.scenario.side*270,y:786,progress:0,state:'waiting'};this.fortify=0;this.decision=null;this.choices=[];
+  this.boss=null;this.pads=[{x:482,y:461,progress:0},{x:839,y:362,progress:0},{x:637,y:650,progress:0}];
+  this.shotAt=0;this.turretAt=0;this.allyAt=0;this.spawnAt=10;this.wave1=false;this.wave2=false;this.mission2=false;this.coins=0;this.score=0;this.routeHistory=[];
+  this.stats={rescued:0,defeated:0,damage:0,hullDamage:0,shots:0,padShots:0,dodged:0,blocked:0,phases:0};
+  this.metrics={bossPatterns:[],enemyKinds:[],positions:[],furthest:0};
+  for(const p of [{x:520,y:1170},{x:790,y:1100},{x:725,y:859},{x:410,y:808},{x:941,y:820}])this.pickups.push({...p,id:++this.id,kind:'heart'});
+ }
+ emit(type,data={}){this.events.push({type,...data});}drainEvents(){return this.events.splice(0);}
+ damagePlayer(n,source){const p=this.player;if(this.state!=='playing'||p.invulnerable>0)return;p.hp=Math.max(0,p.hp-n);p.invulnerable=.8;p.hurt=.35;this.stats.damage+=n;this.emit('hit',{x:p.x,y:p.y,amount:n});if(source){const d=distance(p,source)||1;moveBody(p,(p.x-source.x)/d*16,(p.y-source.y)/d*16);}if(!p.hp)this.finish(false,'Cáo kiệt sức · Hãy né vùng báo đòn');}
+ damageConvoy(n){if(this.state!=='playing')return;this.convoy.hp=Math.max(0,this.convoy.hp-n);this.convoy.hit=.4;this.stats.hullDamage+=n;this.emit('hullHit',{x:this.convoy.x,y:this.convoy.y,amount:n});if(!this.convoy.hp)this.finish(false,'Đoàn xe bị phá · Hãy trở về khi còi báo động vang');}
+ finish(won,reason){if(this.state!=='playing')return;this.state=won?'won':'lost';this.reason=reason;this.score+=Math.round(this.convoy.hp*2)+(won?500:0);this.emit('end',{won});}
+ spawn(kind,x,y){const e={id:++this.id,kind,x,y,hp:{runner:7,spitter:8,brute:17}[kind],state:'seek',clock:0,attack:0,hurt:0,walk:0,facing:1,cooldown:1.5+this.random(),dead:0};this.enemies.push(e);if(!this.metrics.enemyKinds.includes(kind))this.metrics.enemyKinds.push(kind);return e;}
+ hurtEnemy(e,n){if(e.hp<=0)return;e.hp-=n;e.hurt=.18;if(e.hp<=0){e.dead=.45;this.stats.defeated++;this.score+=30;this.coins++;this.emit('poof',{x:e.x,y:e.y});}}
+ fire(from,to,speed=160,damage=12,spread=0){const a=Math.atan2(to.y-from.y,to.x-from.x)+spread;this.projectiles.push({id:++this.id,x:from.x,y:from.y-15,vx:Math.cos(a)*speed,vy:Math.sin(a)*speed,life:6,damage});}
+ warn(kind,x,y,delay,radius=55,extra={}){this.warnings.push({id:++this.id,kind,x,y,timer:delay,total:delay,radius,hit:false,...extra});}
+ decide(kind){if(this.decision)return;this.decision=kind;this.shrine.state=kind==='roots'?'done':'missed';this.choices.push(kind);this.routeHistory.push(kind);this.emit('choice',{choice:kind});
+  if(kind==='roots'){this.barriers=[-104,0,104].map((dx,i)=>({x:this.convoy.x+dx,y:this.convoy.y-83,hp:42,max:42,id:++this.id,index:i}));this.spawn('brute',this.convoy.x+180,this.convoy.y-145);}
+ }
+ update(dt){
+  if(this.state!=='playing')return;dt=clamp(dt,0,.05);this.time+=dt;const t=this.time,p=this.player,c=this.convoy;
+  p.invulnerable=Math.max(0,p.invulnerable-dt);p.hurt=Math.max(0,p.hurt-dt);p.attack=Math.max(0,p.attack-dt);c.hit=Math.max(0,c.hit-dt);
+  let v={...this.input};if(this.target){const d=distance(p,this.target);v=d>4?{x:(this.target.x-p.x)/d*Math.min(1,d/25),y:(this.target.y-p.y)/d*Math.min(1,d/25)}:{x:0,y:0};}
+  const m=Math.hypot(v.x,v.y);if(m>1){v.x/=m;v.y/=m;}const moved=moveBody(p,v.x*225*dt,v.y*225*dt);p.moving=moved/dt;if(moved>.01){p.walk+=moved*.105;if(Math.abs(v.x)>.12)p.facing=v.x>0?1:-1;}
+  this.metrics.furthest=Math.max(this.metrics.furthest,Math.abs(p.x-650));
+  const pos=routePoint(Math.min(t/67,1));c.x=pos.x;c.y=pos.y;
+  for(const b of this.barriers){b.x=c.x+[-104,0,104][b.index];b.y=c.y-83;}
+  if(t>9&&this.camp.state==='waiting'){this.camp.state='open';this.emit('camp',{kind:this.camp.kind});}
+  const camp=this.camp;
+  if(camp.state==='open'){
+   if(distance(p,camp)<49){camp.progress+=dt;if(camp.progress>=2.6){camp.state='rescued';this.allies.push(camp.kind);this.stats.rescued++;this.score+=150;this.choices.push('rescue');this.emit('rescue',{kind:camp.kind,x:camp.x,y:camp.y});}}
+   else camp.progress=Math.max(0,camp.progress-dt*.8);
+   if(t>camp.deadline&&camp.state==='open'){camp.state='missed';this.choices.push('guard');this.emit('missed',{kind:camp.kind});}
   }
-  emit(type, data = {}) { this.events.push({ type, ...data }); }
-  drainEvents() { return this.events.splice(0); }
-  addPickup(kind, x, y) { this.pickups.push({ id: ++this.id, kind, x, y, age: 0 }); }
-  damage(amount, x = this.player.x, y = this.player.y) {
-    if (this.state !== 'playing' || this.player.invulnerable > 0) return;
-    if (this.shield > 0) { this.shield--; this.stats.blocked++; this.emit('block', { x, y }); this.player.invulnerable = 0.6; return; }
-    this.convoy.hp = clamp(this.convoy.hp - amount, 0, 100);
-    this.stats.damage += amount; this.player.invulnerable = 1.05; this.emit('hit', { x, y, amount });
-    if (this.convoy.hp <= 0) this.finish(false, 'Đoàn xe cần được bảo vệ');
+  if(!this.wave1&&t>15){this.wave1=true;this.emit('ambush');for(let i=0;i<3;i++)this.spawn('runner',c.x-140+i*140,c.y-210-i*17);}
+  if(!this.mission2&&t>36){this.mission2=true;this.shrine.state='open';this.emit('mission2');}
+  if(this.shrine.state==='open'){
+   if(distance(p,this.shrine)<51){this.shrine.progress+=dt;if(this.shrine.progress>=2.4)this.decide('roots');}else this.shrine.progress=Math.max(0,this.shrine.progress-dt);
+   if(t>43&&distance(p,c)<90){this.fortify+=dt;if(this.fortify>=4)this.decide('turret');}else this.fortify=Math.max(0,this.fortify-dt*.6);
+   if(t>56&&!this.decision){this.decide('none');this.emit('missed2');}
   }
-  finish(won, reason) {
-    if (this.state !== 'playing') return;
-    this.state = won ? 'won' : 'lost'; this.reason = reason;
-    this.score += Math.round(this.convoy.hp * 3) + (won ? 500 : 0);
-    this.emit('end', { won, reason });
+  if(!this.wave2&&t>44){this.wave2=true;this.spawn('brute',c.x-145,c.y-175);this.spawn('spitter',c.x+165,c.y-190);}
+  if(t>=this.spawnAt&&t<64){this.spawnAt=t+5.8;const kind=t<22?'runner':this.random()<.55?this.scenario.enemy:['runner','spitter','brute'][Math.floor(this.random()*3)];const a=this.random()*Math.PI*2;this.spawn(kind,c.x+Math.cos(a)*210,c.y+Math.sin(a)*185-40);}
+  if(t>=68&&!this.boss){this.phase=2;this.boss={x:660,y:292,home:{x:660,y:292},hp:300,maxHp:300,phase:1,state:'arrive',clock:2.8,pattern:0,activePad:this.variant%3,attackKind:'slam',hit:0,exposed:0};this.metrics.bossPatterns=[];this.emit('boss');}
+  else if(t>=36&&!this.boss)this.phase=1;
+  if(this.boss)this.updateBoss(dt);
+  this.updateEnemies(dt);this.updateProjectiles(dt);this.updateWarnings(dt);
+  const living=this.enemies.filter(e=>e.hp>0);
+  if(t>this.shotAt){const target=living.filter(e=>distance(p,e)<155).sort((a,b)=>distance(p,a)-distance(p,b))[0];if(target){this.shotAt=t+.55;p.attack=.25;this.hurtEnemy(target,3.1);this.stats.shots++;this.emit('shot',{x:p.x,y:p.y-28,tx:target.x,ty:target.y-15});}
+   else if(this.boss?.state==='exposed'&&distance(p,this.boss)<180){this.shotAt=t+.6;p.attack=.25;this.boss.hp-=1.8;this.boss.hit=.15;this.emit('shot',{x:p.x,y:p.y-28,tx:this.boss.x,ty:this.boss.y});}}
+  if(this.decision==='turret'&&t>this.turretAt){this.turretAt=t+.7;const target=living.filter(e=>distance(c,e)<280).sort((a,b)=>distance(c,a)-distance(c,b))[0];if(target){this.hurtEnemy(target,4);this.emit('turretShot',{x:c.x,y:c.y+35,tx:target.x,ty:target.y});}}
+  if(this.allies.length&&t>this.allyAt){this.allyAt=t+({owl:4.5,bear:5,bunny:6}[this.allies[0]]);const kind=this.allies[0];if(kind==='owl'){let n=0;this.projectiles=this.projectiles.filter(b=>{if(distance(b,p)<190){n++;return false;}return true;});this.stats.blocked+=n;this.emit('vacuum',{x:p.x,y:p.y});}
+   if(kind==='bear'){for(const e of living)if(distance(e,c)<235){e.slowUntil=t+3;this.hurtEnemy(e,2);}this.emit('snare',{x:c.x,y:c.y});}
+   if(kind==='bunny'){this.zones.push({x:c.x,y:c.y+45,life:4});c.hp=Math.min(100,c.hp+5);if(distance(p,c)<160)p.hp=Math.min(100,p.hp+9);this.emit('heal',{x:c.x,y:c.y});}}
+  this.zones=this.zones.filter(z=>(z.life-=dt)>0);
+  for(const i of this.pickups)if(!i.used&&distance(p,i)<30){i.used=true;p.hp=Math.min(100,p.hp+22);this.emit('heal',{x:p.x,y:p.y});}
+  this.enemies=this.enemies.filter(e=>e.hp>0||(e.dead-=dt)>0);
+  if(this.boss?.hp<=0){this.boss.hp=0;if(this.boss.state!=='defeated'){this.boss.state='defeated';this.boss.clock=1.5;this.emit('bossDefeated');}if(t>=90&&this.boss.clock<=0)this.finish(true,'Cả đoàn đã vượt rừng!');}
+  if(t>=DURATION&&this.state==='playing')this.finish(false,'Cổng chưa mở · Hãy phản công bằng gương nắng');
+ }
+ updateEnemies(dt){const t=this.time,p=this.player,c=this.convoy;
+  for(const e of this.enemies){e.attack=Math.max(0,e.attack-dt);e.hurt=Math.max(0,e.hurt-dt);if(e.hp<=0)continue;e.clock+=dt;e.cooldown-=dt;
+   const nearPlayer=distance(e,p)<100;const target=e.kind==='runner'?c:nearPlayer?p:c;const d=distance(e,target)||1;const oldx=e.x;let speed=e.kind==='runner'?61:e.kind==='spitter'?35:30;if(e.slowUntil>t)speed*=.28;
+   if(e.state==='windup'){if(e.clock>=e.windup){e.clock=0;e.attack=.45;if(e.kind==='runner'){e.state='dash';e.dx=(e.aim.x-e.x)/(distance(e,e.aim)||1);e.dy=(e.aim.y-e.y)/(distance(e,e.aim)||1);}
+    else if(e.kind==='spitter'){this.fire(e,e.aim,145,13);e.state='seek';e.cooldown=2.5;}
+    else{this.warn('smash',e.aim.x,e.aim.y,.08,64,{damage:19,enemy:e.id});e.state='recover';e.cooldown=3;}}}
+   else if(e.state==='dash'){const dashSpeed=260*(e.slowUntil>t?.28:1);e.x+=e.dx*dashSpeed*dt;e.y+=e.dy*dashSpeed*dt;e.walk+=dt*22;if(distance(e,p)<30)this.damagePlayer(13,e);if(distance(e,c)<43){this.damageConvoy(11);e.hp=0;e.dead=.45;}if(e.clock>.7){e.state='seek';e.cooldown=1.7;e.clock=0;}}
+   else if(e.state==='recover'){if(e.clock>.7){e.clock=0;e.state='seek';}}
+   else{
+    if(e.kind==='spitter'&&d<215){if(e.cooldown<=0){e.state='windup';e.clock=0;e.windup=.85;e.aim={x:p.x,y:p.y};}}
+    else if(e.kind==='brute'&&d<92&&e.cooldown<=0){e.state='windup';e.clock=0;e.windup=1.15;e.aim={...target};this.warn('brute',target.x,target.y,1.15,64,{visual:true});}
+    else if(e.kind==='runner'&&d<170&&e.cooldown<=0){e.state='windup';e.clock=0;e.windup=.8;e.aim={x:target.x,y:target.y};}
+    else if(d>(e.kind==='spitter'?170:43)){const n=moveBody(e,(target.x-e.x)/d*speed*dt,(target.y-e.y)/d*speed*dt,20);e.walk+=n*.12;}
+    else if(e.kind==='brute'&&e.cooldown<=0){this.damageConvoy(9);e.cooldown=2;}
+   }
+   if(Math.abs(e.x-oldx)>.01)e.facing=e.x>oldx?1:-1;
+   for(const b of this.barriers)if(b.hp>0&&distance(e,b)<42){this.hurtEnemy(e,35);b.hp-=14;this.stats.blocked++;this.emit('block',{x:b.x,y:b.y});break;}
   }
-  rescue(r) {
-    const already = this.allies.includes(r.kind);
-    if (!already) { this.allies.push(r.kind); if (r.kind === 'bear') this.shield = Math.min(3, this.shield + 2); }
-    else { this.power += 0.4; this.convoy.hp = Math.min(100, this.convoy.hp + 12); }
-    this.stats.rescued++; this.score += 120;
-    r.done = true; this.emit('rescue', { x: r.x, y: r.y, kind: r.kind, already });
-  }
-  chooseRoute(side) {
-    const r = this.route; if (!r) return;
-    const reward = side === 'left' ? r.left : r.right;
-    if (reward === 'heal') { this.convoy.hp = Math.min(100, this.convoy.hp + 32); this.emit('heal', { x: this.convoy.x, y: this.convoy.y, amount: 32 }); }
-    else if (reward === 'power') { this.power += 1; }
-    else if (reward === 'shield') { this.shield = Math.min(3, this.shield + 2); }
-    else { this.coins += 12; this.stats.gathered += 12; this.score += 120; }
-    this.routeHistory.push(reward); this.stats.routes++;
-    this.emit('route', { reward, x: side === 'left' ? 102 : 288, y: r.y }); this.route = null;
-  }
-  update(dt) {
-    if (this.state !== 'playing') return;
-    dt = Math.min(0.05, Math.max(0, dt)); this.time += dt;
-    const t = this.time, p = this.player, c = this.convoy;
-    p.invulnerable = Math.max(0, p.invulnerable - dt);
-    let vx = 0, vy = 0;
-    if (this.keys.x || this.keys.y) { const m = Math.hypot(this.keys.x, this.keys.y); vx = this.keys.x / m * 310; vy = this.keys.y / m * 310; }
-    else if (this.target) { const d = distance(p, this.target); const s = Math.min(320, d * 10); if (d > 2) { vx = (this.target.x - p.x) / d * s; vy = (this.target.y - p.y) / d * s; } }
-    p.x = clamp(p.x + vx * dt, 26, 364); p.y = clamp(p.y + vy * dt, 228, 714); p.moving = Math.min(1, Math.hypot(vx, vy) / 120);
-    c.x += (clamp(p.x, 87, 303) - c.x) * dt * 1.9;
-    const newPhase = t < 60 ? 0 : t < 132 ? 1 : 2;
-    if (newPhase !== this.phase) { this.phase = newPhase; this.emit('phase', { phase: newPhase }); }
-    if (this.allies.includes('bunny') && t >= this.healAt) { this.healAt = t + 7; const n = Math.min(5, 100 - c.hp); c.hp += n; if (n) this.emit('heal', { x: c.x, y: c.y, amount: n }); }
-    if (this.allies.includes('bear') && t >= this.shieldAt) { this.shieldAt = t + 13; if (this.shield < 2) { this.shield++; this.emit('block', { x: c.x, y: c.y }); } }
-    if (t >= this.itemAt && t < 131) {
-      this.itemAt = t + 2.2;
-      const x = clamp(195 + Math.sin(t * 0.19) * 62 + (this.random() - .5) * 110, 48, 342);
-      for (let i = 0; i < 3; i++) this.addPickup('sun', x + Math.sin(i * 1.8) * 17, 145 - i * 34);
-    }
-    if (t >= this.repairAt && t < 129) { this.repairAt = t + 17; this.addPickup('heart', 60 + this.random() * 270, 145); }
-    if (this.rescueIndex < this.rescueSchedule.length && t >= this.rescueSchedule[this.rescueIndex]) {
-      const i = this.rescueIndex++;
-      this.rescues.push({ id: ++this.id, kind: this.rescueOrder[i % 3], x: [97, 286, 107, 282, 110][i], y: 155, progress: 0, done: false });
-      this.emit('camp', { kind: this.rescueOrder[i % 3] });
-    }
-    const speed = this.phase === 2 ? 22 : this.phase === 1 ? 62 : 53;
-    for (const r of this.rescues) {
-      r.y += speed * dt;
-      if (!r.done && distance(p, r) < 59) { r.progress += dt; if (r.progress >= 1) this.rescue(r); }
-      else r.progress = Math.max(0, r.progress - dt * 0.35);
-    }
-    this.rescues = this.rescues.filter(r => !r.done && r.y < 805);
-    for (const item of this.pickups) {
-      item.age += dt; item.y += speed * dt;
-      const d = distance(p, item), magnet = this.allies.includes('owl') ? 88 : 43;
-      if (d < magnet && d > 1) { item.x += (p.x - item.x) * dt * 10; item.y += (p.y - item.y) * dt * 10; }
-      if (distance(p, item) < 27) {
-        item.collected = true;
-        if (item.kind === 'heart') { const n = Math.min(18, 100 - c.hp); c.hp += n; this.emit('heal', { x: p.x, y: p.y, amount: n }); }
-        else { this.coins++; this.stats.gathered++; this.score += 10;
-          if (this.boss && this.boss.hp > 0) { this.boss.hp = Math.max(0, this.boss.hp - 8); this.emit('beam', { x: p.x, y: p.y, tx: this.boss.x, ty: this.boss.y }); }
-          this.emit('pickup', { x: item.x, y: item.y }); }
-      }
-    }
-    this.pickups = this.pickups.filter(i => !i.collected && i.y < 830);
-    if (t >= this.enemyAt && t < 132) {
-      this.enemyAt = t + (this.phase === 0 ? 5.1 : 3.7);
-      this.enemies.push({ id: ++this.id, x: 38 + this.random() * 310, y: 145, hp: 2.5 + (this.phase ? .8 : 0), age: 0 });
-    }
-    if (t >= this.hazardAt && t < 126) {
-      this.hazardAt = t + 7.2; const lane = Math.floor(this.random() * 3);
-      this.hazards.push({ id: ++this.id, x: [92, 195, 298][lane], y: 145, kind: this.random() < .5 ? 'log' : 'rock', hit: false, passed: false });
-    }
-    for (const h of this.hazards) {
-      h.y += speed * dt;
-      if (!h.hit && Math.abs(p.x - h.x) < 42 && Math.abs(p.y - h.y) < 30) { h.hit = true; this.damage(9, h.x, h.y); }
-      if (!h.passed && h.y > c.y - 26) { h.passed = true; if (Math.abs(c.x - h.x) < 49) this.damage(11, h.x, h.y); }
-    }
-    this.hazards = this.hazards.filter(h => h.y < 850);
-    for (const e of this.enemies) {
-      e.age += dt; e.y += (this.phase === 0 ? 61 : 73) * dt; e.x += clamp(c.x - e.x, -38, 38) * dt * .35;
-      if (distance(e, p) < 29 && e.hp > 0) { this.damage(8, e.x, e.y); e.hp = 0; this.emit('poof', { x: e.x, y: e.y }); }
-      else if (e.y > c.y - 25 && e.hp > 0) { this.damage(13, c.x, c.y); e.hp = 0; this.emit('poof', { x: e.x, y: e.y }); }
-    }
-    if (!this.route && this.routeHistory.length < 2 && t > [55, 101][this.routeHistory.length]) {
-      const second = this.routeHistory.length === 1;
-      this.route = { y: 150, left: second ? 'shield' : 'heal', right: second ? 'sun' : 'power' };
-      if (this.random() < .5) [this.route.left, this.route.right] = [this.route.right, this.route.left];
-      this.emit('fork');
-    }
-    if (this.route) {
-      this.route.y += 45 * dt;
-      if (Math.abs(p.y - this.route.y) < 32 && (p.x < 148 || p.x > 242)) this.chooseRoute(p.x < 195 ? 'left' : 'right');
-      else if (this.route.y > 640) this.chooseRoute(p.x < 195 ? 'left' : 'right');
-    }
-    if (this.phase === 2) this.updateBoss(dt);
-    if (t >= this.shotAt) {
-      const range = this.allies.includes('owl') ? 185 : 143;
-      const near = this.enemies.filter(e => e.hp > 0 && distance(p, e) < range).sort((a, b) => distance(p, a) - distance(p, b))[0];
-      let target = near;
-      if (!target && this.boss?.hp > 0 && distance(p, this.boss) < range + 55 && this.boss.vulnerable) target = this.boss;
-      if (target) {
-        this.shotAt = t + .7; target.hp -= 1.5 + this.power + this.allies.length * .28;
-        this.emit('shot', { x: p.x, y: p.y - 20, tx: target.x, ty: target.y, boss: target === this.boss });
-        if (target !== this.boss && target.hp <= 0) { this.stats.defeated++; this.score += 25; this.emit('poof', { x: target.x, y: target.y }); this.addPickup('sun', target.x, target.y); }
-      }
-    }
-    this.enemies = this.enemies.filter(e => e.hp > 0 && e.y < 760);
-    if (this.boss && this.boss.hp <= 0 && this.state === 'playing') { this.boss.hp = 0; this.finish(true, 'Cánh cổng phiêu lưu đã mở!'); }
-    if (t >= DURATION && this.state === 'playing') this.finish(false, 'Hết giờ · thần cây vẫn giữ cổng');
-  }
-  updateBoss(dt) {
-    const t = this.time;
-    if (!this.boss) { this.boss = { x: 195, y: 272, hp: 300, maxHp: 300, vulnerable: false }; this.enemies = []; this.hazards = []; }
-    this.boss.x = 195 + Math.sin(t * .65) * 55;
-    this.boss.vulnerable = t % 7 < 4.7;
-    if (distance(this.player, this.boss) < 88) { this.damage(10, this.player.x, this.player.y); this.player.y = this.boss.y + 89; }
-    if (t > this.bossSunAt) {
-      this.bossSunAt = t + 1.8;
-      const x = [74, 195, 316][Math.floor(this.random() * 3)];
-      this.addPickup('sun', x, 365);
-    }
-    if (t > this.bossAttackAt) {
-      this.bossAttackAt = t + 2.6;
-      this.warnings.push({ id: ++this.id, x: this.player.x, y: this.player.y, radius: 51, timer: 1.25, total: 1.25, hit: false });
-      if (t > 153) this.warnings.push({ id: ++this.id, x: clamp(this.player.x + (this.random() < .5 ? -95 : 95), 55, 335), y: this.player.y + 48, radius: 45, timer: 1.55, total: 1.55, hit: false });
-    }
-    for (const w of this.warnings) {
-      w.timer -= dt;
-      if (!w.hit && w.timer <= 0) { w.hit = true; this.emit('slam', { x: w.x, y: w.y }); if (distance(this.player, w) < w.radius + 7) this.damage(17, w.x, w.y); }
-    }
-    this.warnings = this.warnings.filter(w => w.timer > -.55);
-  }
-  snapshot() {
-    return { state: this.state, time: this.time, phase: this.phase, player: { ...this.player }, convoy: { ...this.convoy }, allies: [...this.allies], coins: this.coins, power: this.power, shield: this.shield, stats: { ...this.stats }, pickups: this.pickups.map(x => ({ ...x })), rescues: this.rescues.map(x => ({ ...x })), hazards: this.hazards.map(x => ({ ...x })), warnings: this.warnings.map(x => ({ ...x })), enemies: this.enemies.map(x => ({ ...x })), route: this.route ? { ...this.route } : null, routes: [...this.routeHistory], boss: this.boss ? { ...this.boss } : null, seed: this.seed };
-  }
+ }
+ updateProjectiles(dt){const p=this.player,c=this.convoy;for(const b of this.projectiles){b.life-=dt;b.x+=b.vx*dt;b.y+=b.vy*dt;for(const wall of this.barriers)if(wall.hp>0&&distance(b,wall)<41){wall.hp-=6;b.life=0;this.stats.blocked++;this.emit('block',{x:wall.x,y:wall.y});break;}if(b.life<=0)continue;if(distance(b,p)<20){this.damagePlayer(b.damage,b);b.life=0;}else if(distance(b,c)<35){this.damageConvoy(6);b.life=0;}}this.projectiles=this.projectiles.filter(b=>b.life>0&&b.x>20&&b.x<WORLD.w-20&&b.y>80&&b.y<WORLD.h);}
+ updateWarnings(dt){for(const w of this.warnings){w.timer-=dt;if(w.timer<=0&&!w.hit){w.hit=true;if(w.visual)continue;if(w.kind==='fan'){for(let i=-w.count;i<=w.count;i++)this.fire(w,w.aim,170,w.damage||15,i*.18);}
+   else if(w.kind==='charge'){/* Boss collision is swept by the moving body. */}
+   else{this.emit('slam',{x:w.x,y:w.y});if(distance(this.player,w)<w.radius+13)this.damagePlayer(w.damage||18,w);else this.stats.dodged++;if(w.enemy&&distance(this.convoy,w)<w.radius+24)this.damageConvoy(9);}}}this.warnings=this.warnings.filter(w=>w.timer>-.5);}
+ updateBoss(dt){const b=this.boss,t=this.time,p=this.player;b.clock-=dt;b.hit=Math.max(0,b.hit-dt);
+  if(b.hp<=0)return;
+  if(b.hp<=150&&b.phase===1){b.phase=2;b.pattern=0;b.state='roar';b.clock=1.8;this.warnings=[];this.emit('bossPhase');this.stats.phases++;}
+  if(b.state==='arrive'||b.state==='roar'){if(b.clock<=0){b.state='prepare';b.clock=.6;}}
+  else if(b.state==='prepare'&&b.clock<=0){const sequence=b.phase===1?this.scenario.bossOrder.filter(k=>k!=='charge'):['charge',...this.scenario.bossOrder.filter(k=>k!=='charge')];const kind=sequence[b.pattern++%sequence.length];b.attackKind=kind;b.state='windup';b.clock=b.phase===2?1.05:1.4;this.metrics.bossPatterns.push(`${b.phase}:${kind}`);b.aim={x:p.x,y:p.y};
+   if(kind==='slam'){for(let i=0;i<(b.phase===2?3:2);i++)this.warn('slam',clamp(p.x+(i-1)*87,385,930),p.y+(i===1?60:0),b.clock+i*.16,53,{damage:18});}
+   if(kind==='fan')this.warn('fan',b.x,b.y,b.clock,60,{aim:{...p},count:b.phase===2?3:2,damage:15});
+   if(kind==='charge'){b.start={x:b.x,y:b.y};const d=distance(b,p)||1;b.end={x:clamp(b.x+(p.x-b.x)/d*315,400,912),y:clamp(b.y+(p.y-b.y)/d*315,215,590)};this.warn('charge',b.x,b.y,b.clock,37,{end:b.end,visual:true});}}
+  else if(b.state==='windup'&&b.clock<=0){if(b.attackKind==='charge'){b.state='charge';b.clock=.65;}else{b.state='exposed';b.clock=3.1;this.emit('expose');}}
+  else if(b.state==='charge'){const f=clamp(1-b.clock/.65,0,1);b.x=b.start.x+(b.end.x-b.start.x)*f;b.y=b.start.y+(b.end.y-b.start.y)*f;if(distance(b,p)<65)this.damagePlayer(23,b);if(b.clock<=0){b.state='exposed';b.clock=3.1;this.emit('expose');}}
+  else if(b.state==='exposed'&&b.clock<=0){b.state='return';b.clock=.9;}
+  else if(b.state==='return'){b.x+=(b.home.x-b.x)*dt*7;b.y+=(b.home.y-b.y)*dt*7;if(b.clock<=0){b.x=b.home.x;b.y=b.home.y;b.state='prepare';b.clock=.45;}}
+  for(let i=0;i<this.pads.length;i++){const pad=this.pads[i];if(i===b.activePad&&distance(p,pad)<35){pad.progress=Math.min(.72,pad.progress+dt);if(pad.progress>=.72&&b.state==='exposed'){b.hp-=45;b.hit=.4;this.stats.padShots++;this.score+=80;this.emit('beam',{x:pad.x,y:pad.y,tx:b.x,ty:b.y});pad.progress=0;b.activePad=(b.activePad+1+(this.variant===2?1:0))%3;}}
+   else pad.progress=Math.max(0,pad.progress-dt*1.4);}
+ }
+ snapshot(){return structuredClone({seed:this.seed,variant:this.variant,scenario:this.scenario,time:this.time,state:this.state,phase:this.phase,player:this.player,convoy:this.convoy,camp:this.camp,shrine:this.shrine,fortify:this.fortify,decision:this.decision,choices:this.choices,allies:this.allies,enemies:this.enemies,projectiles:this.projectiles,warnings:this.warnings,barriers:this.barriers,pickups:this.pickups,zones:this.zones,boss:this.boss,pads:this.pads,stats:this.stats,metrics:this.metrics,score:this.score,coins:this.coins});}
 }
