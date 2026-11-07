@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#183f3c">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="description" content="Dẫn đoàn xe qua khu rừng kỳ diệu. Một cuộc phiêu lưu nhỏ, những người bạn lớn.">
+  <title>Đoàn Xe Phiêu Lưu</title>
+  <link rel="icon" href="./assets/fox.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="./src/style.css">
+</head>
+<body>
+  <main id="app" aria-label="Đoàn Xe Phiêu Lưu">
+    <canvas id="game" width="390" height="844" aria-label="Sân chơi. Kéo một ngón tay hoặc dùng các phím mũi tên để dẫn đoàn xe."></canvas>
+    <div id="loading" class="loading"><img src="./assets/sun.svg" alt=""><span>Đang đánh thức khu rừng…</span></div>
+    <section id="home" class="screen home" hidden>
+      <div class="edition"><span class="tiny-star">✦</span> CHUYẾN ĐI ĐẦU TIÊN <span class="tiny-star">✦</span></div>
+      <h1><span>Đoàn Xe</span><strong>PHIÊU LƯU</strong></h1>
+      <p class="tagline">Một chuyến đi nhỏ. Những người bạn lớn.</p>
+      <div class="home-bottom">
+        <div class="traits"><span>3 PHÚT</span><i>✦</i><span>1 NGÓN TAY</span><i>✦</i><span>VÔ VÀN NIỀM VUI</span></div>
+        <button id="play" class="primary">Lên đường <span aria-hidden="true">➜</span></button>
+        <div class="home-links"><button id="journal" class="text-button">Sổ hành trình <span id="collection-count">0/3</span></button><button id="home-sound" class="text-button" aria-label="Bật hoặc tắt âm thanh">♫ Âm thanh</button></div>
+        <p class="build-label">BẢN CHƠI THỬ · MỐC 1</p>
+      </div>
+    </section>
+    <section id="hud" class="hud" hidden aria-label="Trạng thái chuyến đi">
+      <header class="topbar"><div class="chapter"><span id="chapter-number">01</span><div><small>CHUYẾN THÁM HIỂM</small><strong id="chapter-name">Rừng thì thầm</strong></div></div><button id="sound" class="icon-button" aria-label="Tắt âm thanh">♫</button><button id="pause" class="icon-button" aria-label="Tạm dừng"><span class="pause-bars" aria-hidden="true"></span></button></header>
+      <div class="resources"><div class="health" aria-label="Độ bền đoàn xe"><img src="./assets/camper.svg" alt=""><div class="health-track"><div id="health-fill"></div></div><b id="health-value">100</b><span id="shield-value"></span></div><div class="suns"><img src="./assets/sun.svg" alt="Nắng"><b id="sun-value">0</b></div></div>
+      <div class="journey"><div class="journey-line"><div id="journey-fill"></div></div><span class="journey-stop active">✿</span><span id="stop-2" class="journey-stop">⌁</span><span id="stop-3" class="journey-stop">♜</span></div>
+      <div id="boss-hud" class="boss-hud" hidden><div><strong>THẦN CÂY GIỮ CỔNG</strong><span id="boss-hint">Gom nắng để phá giáp</span></div><div class="boss-track"><div id="boss-fill"></div></div></div>
+      <div id="toast" class="toast" role="status" hidden><img id="toast-icon" src="./assets/sun.svg" alt=""><div><strong id="toast-title"></strong><small id="toast-detail"></small></div></div>
+      <div class="bottom-hud"><span id="timer" class="timer">03:00</span><div id="crew" class="crew"><div data-kind="bunny"><img src="./assets/bunny.svg" alt="Mây, thỏ chữa lành"><b>?</b></div><div data-kind="owl"><img src="./assets/owl.svg" alt="Mực, cú trinh sát"><b>?</b></div><div data-kind="bear"><img src="./assets/bear.svg" alt="Bắp, gấu hộ vệ"><b>?</b></div></div><span class="escort-label">HỘ TỐNG<br><b id="crew-count">0 / 3</b></span></div>
+      <div id="gesture-tip" class="gesture-tip"><span>↔</span><strong>Kéo để dẫn đường</strong><small>Gom nắng · Đứng gần để cứu bạn</small></div>
+    </section>
+    <section id="pause-screen" class="modal-screen" hidden aria-label="Tạm dừng">
+      <div class="modal pause-card"><span class="eyebrow">NGHỈ CHÂN MỘT CHÚT</span><img class="pause-fox" src="./assets/fox.svg" alt="Cáo thám hiểm"><h2>Rừng vẫn đợi bạn</h2><p id="pause-copy">Chuyến đi đã được tạm dừng.</p><button id="resume" class="primary">Đi tiếp <span>➜</span></button><button id="restart" class="secondary">Bắt đầu chuyến mới</button><button id="back-home" class="text-button">Về trại</button></div>
+    </section>
+    <section id="result" class="modal-screen result-screen" hidden aria-label="Tổng kết chuyến đi">
+      <div class="modal result-card"><span id="result-eyebrow" class="eyebrow">MỘT CHUYẾN ĐI TUYỆT VỜI</span><div class="result-art"><img src="./assets/gate.svg" alt="Cổng rừng"><img id="result-character" src="./assets/fox.svg" alt="Cáo thám hiểm"><span>✦</span><span>✦</span></div><h2 id="result-title">Cả đoàn đã về đích!</h2><p id="result-detail"></p><div class="result-stats"><div><img src="./assets/sun.svg" alt=""><strong id="result-sun"></strong><small>NẮNG THU THẬP</small></div><div><img src="./assets/bunny.svg" alt=""><strong id="result-rescued"></strong><small>BẠN GIẢI CỨU</small></div><div><img src="./assets/shield.svg" alt=""><strong id="result-hp"></strong><small>ĐỘ BỀN XE</small></div></div><div class="score-line"><span>ĐIỂM HÀNH TRÌNH</span><strong id="result-score"></strong></div><p id="record-note" class="record-note"></p><button id="replay" class="primary">Thêm một chuyến! <span>➜</span></button><button id="result-home" class="text-button">Về trại</button></div>
+    </section>
+    <section id="journal-screen" class="modal-screen" hidden aria-label="Sổ hành trình">
+      <div class="modal journal-card"><span class="eyebrow">NHỮNG ĐIỀU MANG THEO</span><h2>Sổ hành trình</h2><div id="album" class="album"></div><div id="local-stats" class="local-stats"></div><p class="privacy">Chỉ lưu trên trình duyệt này.<br>Không tài khoản · Không gửi dữ liệu lên mạng.</p><button id="close-journal" class="primary">Về trại <span>➜</span></button><button id="clear-data" class="text-button">Xóa dữ liệu thử nghiệm</button></div>
+    </section>
+    <div id="rotate-hint" class="rotate-hint" hidden>Xoay dọc màn hình để khám phá trọn khu rừng ↻</div>
+    <noscript>Hãy bật JavaScript để chơi Đoàn Xe Phiêu Lưu.</noscript>
+  </main>
+  <script type="module" src="./src/game.js"></script>
+</body>
+</html>

@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="146" height="188" viewBox="0 0 146 188"><defs>
+ <linearGradient id="teal" x2="0.3" y2="1"><stop stop-color="#9df2c8"/><stop offset="1" stop-color="#328d88"/></linearGradient>
+ <linearGradient id="gold" x2="0.2" y2="1"><stop stop-color="#ffea9b"/><stop offset="1" stop-color="#e9a441"/></linearGradient>
+ <linearGradient id="leaf" x2="0.3" y2="1"><stop stop-color="#88d68b"/><stop offset="1" stop-color="#25866d"/></linearGradient>
+ <linearGradient id="orange" x2="0.4" y2="1"><stop stop-color="#ffca73"/><stop offset="1" stop-color="#e67942"/></linearGradient>
+ <linearGradient id="purple" x2="0.3" y2="1"><stop stop-color="#d9b4e9"/><stop offset="1" stop-color="#8d61b4"/></linearGradient>
+ <linearGradient id="stone" x2="0.6" y2="1"><stop stop-color="#a8c6b1"/><stop offset="1" stop-color="#537e79"/></linearGradient>
+</defs><g stroke="#294c48" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round">
+ <path d="M65 123Q68 154 48 178L67 173L77 181L88 170L106 172Q83 147 86 118" fill="#96734e" stroke-width="3"/>
+ <path d="M74 144L69 168M80 145L90 161" stroke="#bc9a68" fill="none"/>
+ <path d="M25 128Q0 120 10 96Q-2 70 20 61Q10 31 39 30Q45 6 70 13Q92 -2 111 21Q140 19 133 49Q155 66 138 91Q154 115 126 126Q112 151 87 135Q51 150 25 128Z" fill="#247e67" stroke-width="3"/>
+ <path d="M23 96Q5 71 31 61Q22 37 48 39Q50 15 76 24Q99 3 112 31Q136 32 124 58Q149 80 123 97Q110 121 86 109Q54 127 41 105Z" fill="url(#leaf)" stroke="none"/>
+ <path d="M35 58Q51 41 65 50M80 36Q96 22 104 41M96 81Q117 64 126 73M34 89Q41 78 56 83M62 109L74 103" fill="none" stroke="#ace29c" stroke-width="5"/>
+ <path d="M16 122L29 119M113 124L126 116" stroke="#56ae80" stroke-width="4"/>
+ </g></svg>
